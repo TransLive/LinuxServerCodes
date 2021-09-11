@@ -20,6 +20,7 @@
 class process
 {
 public:
+    //procee constructor
     process() : m_pid( -1 ){}
 
 public:
@@ -48,41 +49,54 @@ public:
     void run();
 
 private:
+    //統一事件源
     void setup_sig_pipe();
     void run_parent();
     void run_child();
 
 private:
+    //最大允許子進程數量
     static const int MAX_PROCESS_NUMBER = 16;
+    //最多處理客戶數量
     static const int USER_PER_PROCESS = 65536;
+    //epoll最多處理事件數
     static const int MAX_EVENT_NUMBER = 10000;
+    //進程池進程總數
     int m_process_number;
+    //子進程在池中序號，從0開始
     int m_idx;
+    //每個進程都有一個epoll內核事件表，用m_epollfd標識
     int m_epollfd;
+    //監聽socket
     int m_listenfd;
+    //子進程判斷m_stop來決定是否停止運行
     int m_stop;
+    //子進程描述信息
     process* m_sub_process;
+    //進程池靜態實例
     static processpool< T >* m_instance;
 };
 template< typename T >
 processpool< T >* processpool< T >::m_instance = NULL;
 
+//處理信號的管道，用來統一事件源
 static int sig_pipefd[2];
 
 static int setnonblocking( int fd )
 {
-    int old_option = fcntl( fd, F_GETFL );
-    int new_option = old_option | O_NONBLOCK;
-    fcntl( fd, F_SETFL, new_option );
+    int old_option = fcntl( fd, F_GETFL );//得到舊fd的設置
+    int new_option = old_option | O_NONBLOCK;//做或運算，添加NONBLOCK設置
+    fcntl( fd, F_SETFL, new_option );//將新設置反映到fd中
     return old_option;
 }
 
+//添加被監聽的fd
 static void addfd( int epollfd, int fd )
 {
     epoll_event event;
     event.data.fd = fd;
-    event.events = EPOLLIN | EPOLLET;
-    epoll_ctl( epollfd, EPOLL_CTL_ADD, fd, &event );
+    event.events = EPOLLIN | EPOLLET;//可讀| ET模式
+    epoll_ctl( epollfd, EPOLL_CTL_ADD, fd, &event );//註冊事件
     setnonblocking( fd );
 }
 
@@ -96,7 +110,7 @@ static void sig_handler( int sig )
 {
     int save_errno = errno;
     int msg = sig;
-    send( sig_pipefd[1], ( char* )&msg, 1, 0 );
+    send( sig_pipefd[1], ( char* )&msg, 1, 0 );//將信號值寫入管道
     errno = save_errno;
 }
 
@@ -104,15 +118,16 @@ static void addsig( int sig, void( handler )(int), bool restart = true )
 {
     struct sigaction sa;
     memset( &sa, '\0', sizeof( sa ) );
-    sa.sa_handler = handler;
+    sa.sa_handler = handler;//設置信號處理函數
     if( restart )
     {
-        sa.sa_flags |= SA_RESTART;
+        sa.sa_flags |= SA_RESTART;//重新調用被該信號終止的系統調用
     }
     sigfillset( &sa.sa_mask );
     assert( sigaction( sig, &sa, NULL ) != -1 );
 }
 
+//進程池構造函數
 template< typename T >
 processpool< T >::processpool( int listenfd, int process_number ) 
     : m_listenfd( listenfd ), m_process_number( process_number ), m_idx( -1 ), m_stop( false )
@@ -143,13 +158,14 @@ processpool< T >::processpool( int listenfd, int process_number )
     }
 }
 
+//統一事件源
 template< typename T >
 void processpool< T >::setup_sig_pipe()
 {
     m_epollfd = epoll_create( 5 );
     assert( m_epollfd != -1 );
 
-    int ret = socketpair( PF_UNIX, SOCK_STREAM, 0, sig_pipefd );
+    int ret = socketpair( PF_UNIX, SOCK_STREAM, 0, sig_pipefd );//socketpair用於方便地創建雙向管道
     assert( ret != -1 );
 
     setnonblocking( sig_pipefd[1] );
@@ -158,7 +174,7 @@ void processpool< T >::setup_sig_pipe()
     addsig( SIGCHLD, sig_handler );
     addsig( SIGTERM, sig_handler );
     addsig( SIGINT, sig_handler );
-    addsig( SIGPIPE, SIG_IGN );
+    addsig( SIGPIPE, SIG_IGN );//SIG_IGN 表示無視前面那個信號
 }
 
 template< typename T >
@@ -172,6 +188,7 @@ void processpool< T >::run()
     run_parent();
 }
 
+//
 template< typename T >
 void processpool< T >::run_child()
 {
